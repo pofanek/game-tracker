@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Game Tracker</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#0e0e18;font-family:'JetBrains Mono','Fira Code',monospace;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-thumb{background:#222236;border-radius:99px;}
+    .item-row:hover .item-del{opacity:1!important;}
+    .game-card:hover{border-color:#333350!important;}
+    @keyframes slideUp{from{transform:translateY(20px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+    @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+    .nav-btn{cursor:pointer;padding:5px 11px;border-radius:6px;font-size:11px;border:1px solid transparent;transition:all .15s;background:transparent;font-family:inherit;}
+    .nav-btn:hover{background:#1a1a28;}
+    .nav-btn.active{border-color:#333358;color:#ddddf5;}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── Supabase ──────────────────────────────────────────────────────────────────
+const SUPA_URL  = "https://dyqibdmsoerqatqqfonn.supabase.co";
+const SUPA_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR5cWliZG1zb2VycWF0cXFmb25uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5OTMzNjEsImV4cCI6MjA4ODU2OTM2MX0.Gk0xsVbZj8vzXHjgYbFVQkKwEIl3-viRLmmta0daNJY";
+const sb = supabase.createClient(SUPA_URL, SUPA_ANON);
+
+// Storage abstraction — mirrors window.storage API used in the Claude artifact
+const storage = {
+  async get(key) {
+    const { data } = await sb.from("kv_store").select("value").eq("key", key).maybeSingle();
+    return data ? { value: data.value } : null;
+  },
+  async set(key, value, shared = false) {
+    await sb.from("kv_store").upsert({ key, value, shared, updated_at: new Date().toISOString() }, { onConflict: "key" });
+  },
+  async delete(key) {
+    await sb.from("kv_store").delete().eq("key", key);
+  },
+};
+
+// ─── i18n ──────────────────────────────────────────────────────────────────────
+const LANGS = {
+  en: {
+    appName:"GAME TRACKER", back:"← back",
+    inProgress:"⚡ IN PROGRESS", recent:"✅ COMPLETED (last 24h)", games:"🎮 GAMES",
+    noInProgress:"No milestone is currently in progress",
+    noRecent:"No completions in the last 24h",
+    clearRecent:"Clear history",
+    clearRecentConfirm:"Clear all completion timestamps? Items will stay but won't appear in 'last 24h'.",
+    addGame:"+ add game",
+    liveShare:"🔗 share live", disableShare:"disable share",
+    shareActive:"Live sharing active — viewers see your progress in real time.",
+    shareCopied:"✓ copied!",
+    liveLabel:"LIVE", liveOk:"🟢 live", liveLoading:"🔄 refreshing...",
+    shareNotFound:"Data not found.", shareDisabled:"The owner may have disabled sharing.",
+    loading:"loading...",
+    lists:"lists", completed:"completed",
+    noItems:'No items — click "+ item" to add one!',
+    addList:"+ add milestone list",
+    addGame2:"Add game", premadeTemplates:"BUILT-IN TEMPLATES", communitySection:"COMMUNITY TEMPLATES",
+    showMore:"show more ▾", showLess:"show less ▴",
+    custom:"CUSTOM", gameName:"game name", color:"color:", addCustom:"add custom",
+    newList:"New milestone list", listPlaceholder:"e.g. Boss No-Hit Run",
+    newItem:"New milestone", itemPlaceholder:"e.g. Radiance – No Hit",
+    add:"add", cancel:"cancel", delete:"Delete", sureQuestion:"Are you sure?",
+    deleteGame:"delete game",
+    deleteGameConfirm:(n)=>`Delete game "${n}"? You'll lose all progress.`,
+    deleteListConfirm:(n)=>`Delete list "${n}"?`,
+    undoDeleted:"Deleted", undoList:"Deleted list", undoItem:"Deleted", undo:"↩ Undo",
+    community:"🌐 Community", communityTitle:"COMMUNITY TEMPLATES",
+    communityDesc:"Templates shared by other users. Load one to add it as a new game.",
+    submitTemplate:"Submit template",
+    submitTitle:"Share a template", updateTitle:"Update template",
+    submitGameSelect:"Select a game from your list:",
+    submitBtn:"Submit", updateBtn:"Update",
+    submitValidation:"Each list must have at least 3 items.",
+    submitSuccess:"Template submitted!", updateSuccess:"Template updated!",
+    duplicateBuiltin:"This game already has a built-in template.",
+    loadTemplate:"Load", deleteTemplate:"Delete", updateAvailable:"Update available",
+    applyUpdate:"Apply update", updateApplied:"Updated!",
+    noTemplates:"No community templates yet. Be the first!",
+    submittedBy:"by",
+    settings:"⚙ Settings", settingsTitle:"SETTINGS", language:"Language",
+    statsTitle:"Stats", totalGames:"Total games", totalMilestones:"Total milestones",
+    totalCompleted:"Completed", inProgressCount:"In progress",
+    status_none:"", status_in_progress:"IN PROGRESS", status_completed:"COMPLETED",
+    adminPanel:"Admin panel",
+    updateNotice:(n)=>`"${n}" has a template update available.`,
+    username:"Username", usernamePlaceholder:"e.g. CoolGamer99",
+    usernameSet:"Username saved!", usernameEdit:"Edit username",
+    usernameLabel:"Your name", anonymous:"anonymous",
+    usernameHint:"Shown next to your community templates and live share.",
+    viewingShare:(name)=>`Viewing ${name}'s tracker`,
+  },
+  pl: {
+    appName:"GAME TRACKER", back:"← wróć",
+    inProgress:"⚡ IN PROGRESS", recent:"✅ UKOŃCZONE (ostatnie 24h)", games:"🎮 GIERKI",
+    noInProgress:"Żaden milestone nie jest w toku",
+    noRecent:"Brak ukończonych w ostatnich 24h",
+    clearRecent:"Wyczyść historię",
+    clearRecentConfirm:"Wyczyścić historię ukończeń? Itemy zostaną, ale znikną z sekcji 'ostatnie 24h'.",
+    addGame:"+ dodaj grę",
+    liveShare:"🔗 udostępnij live", disableShare:"wyłącz share",
+    shareActive:"Udostępnianie aktywne — przeglądający widzą twój progres na żywo.",
+    shareCopied:"✓ skopiowano!",
+    liveLabel:"LIVE", liveOk:"🟢 na żywo", liveLoading:"🔄 odświeżanie...",
+    shareNotFound:"Nie znaleziono danych.", shareDisabled:"Właściciel mógł wyłączyć udostępnianie.",
+    loading:"ładowanie...",
+    lists:"list", completed:"ukończonych",
+    noItems:'Brak itemów — kliknij "+ item" żeby dodać!',
+    addList:"+ dodaj listę milestoneów",
+    addGame2:"Dodaj grę", premadeTemplates:"WBUDOWANE SZABLONY", communitySection:"SZABLONY SPOŁECZNOŚCI",
+    showMore:"pokaż więcej ▾", showLess:"pokaż mniej ▴",
+    custom:"WŁASNA", gameName:"nazwa gry", color:"kolor:", addCustom:"dodaj własną",
+    newList:"Nowa lista milestoneów", listPlaceholder:"np. Boss No-Hit Run",
+    newItem:"Nowy milestone", itemPlaceholder:"np. Radiance – No Hit",
+    add:"dodaj", cancel:"anuluj", delete:"Usuń", sureQuestion:"Na pewno?",
+    deleteGame:"usuń grę",
+    deleteGameConfirm:(n)=>`Usunąć grę "${n}"? Stracisz cały progres.`,
+    deleteListConfirm:(n)=>`Usunąć listę "${n}"?`,
+    undoDeleted:"Usunięto", undoList:"Usunięto listę", undoItem:"Usunięto", undo:"↩ Cofnij",
+    community:"🌐 Community", communityTitle:"SZABLONY SPOŁECZNOŚCI",
+    communityDesc:"Szablony udostępnione przez innych użytkowników. Wczytaj jeden jako nową grę.",
+    submitTemplate:"Dodaj szablon",
+    submitTitle:"Udostępnij szablon", updateTitle:"Aktualizuj szablon",
+    submitGameSelect:"Wybierz grę ze swojej listy:",
+    submitBtn:"Wyślij", updateBtn:"Zaktualizuj",
+    submitValidation:"Każda lista musi mieć co najmniej 3 itemy.",
+    submitSuccess:"Szablon dodany!", updateSuccess:"Szablon zaktualizowany!",
+    duplicateBuiltin:"Ta gra ma już wbudowany szablon.",
+    loadTemplate:"Wczytaj", deleteTemplate:"Usuń", updateAvailable:"Dostępna aktualizacja",
+    applyUpdate:"Zastosuj aktualizację", updateApplied:"Zaktualizowano!",
+    noTemplates:"Brak szablonów społeczności. Bądź pierwszy!",
+    submittedBy:"od",
+    settings:"⚙ Ustawienia", settingsTitle:"USTAWIENIA", language:"Język",
+    statsTitle:"Statystyki", totalGames:"Gier łącznie", totalMilestones:"Milestoneów łącznie",
+    totalCompleted:"Ukończonych", inProgressCount:"W toku",
+    status_none:"", status_in_progress:"IN PROGRESS", status_completed:"UKOŃCZONO",
+    adminPanel:"Panel admina",
+    updateNotice:(n)=>`"${n}" ma dostępną aktualizację szablonu.`,
+    username:"Nazwa użytkownika", usernamePlaceholder:"np. CoolGamer99",
+    usernameSet:"Zapisano!", usernameEdit:"Zmień nazwę",
+    usernameLabel:"Twoja nazwa", anonymous:"anonim",
+    usernameHint:"Wyświetlana przy twoich szablonach i live share.",
+    viewingShare:(name)=>`Tracker użytkownika ${name}`,
+  }
+};
+
+// ─── Built-in premades ─────────────────────────────────────────────────────────
+const BUILTIN = [
+  { id:"hk", name:"Hollow Knight", emoji:"🐛", color:"#a78bfa", lists:[
+    { id:"hk-nohit", name:"Boss No-Hit Run", items:[
+      {id:"hk-fk",label:"False Knight"},{id:"hk-mg",label:"Massive Moss Charger"},
+      {id:"hk-h1",label:"Hornet (Greenpath)"},{id:"hk-gs",label:"Gorgeous Husk"},
+      {id:"hk-sm",label:"Soul Master"},{id:"hk-db",label:"Dung Defender"},
+      {id:"hk-sh",label:"Shade (own)"},{id:"hk-cr",label:"Crystal Guardian"},
+      {id:"hk-ml",label:"Mantis Lords"},{id:"hk-sg",label:"Soul Warrior"},
+      {id:"hk-bk",label:"Brooding Mawlek"},{id:"hk-nb",label:"Nosk"},
+      {id:"hk-fl",label:"Flukemarm"},{id:"hk-gg",label:"Broken Vessel"},
+      {id:"hk-unn",label:"Uumuu"},{id:"hk-h2",label:"Hornet (Kingdom's Edge)"},
+      {id:"hk-tl",label:"Traitor Lord"},{id:"hk-gc",label:"God Tamer"},
+      {id:"hk-cm",label:"Collector"},{id:"hk-wh",label:"Watcher Knight"},
+      {id:"hk-lc",label:"Lost Kin"},{id:"hk-ss",label:"Soul Tyrant"},
+      {id:"hk-dd",label:"Failed Champion"},{id:"hk-wk",label:"White Defender"},
+      {id:"hk-gr",label:"Grey Prince Zote"},{id:"hk-pv",label:"Pure Vessel"},
+      {id:"hk-nk",label:"Nightmare King Grimm"},{id:"hk-hk",label:"Hollow Knight"},
+      {id:"hk-rad",label:"Radiance"},{id:"hk-abs",label:"Absolute Radiance"},
+    ]},
+    { id:"hk-pan", name:"Pantheons", items:[
+      {id:"p1",label:"Pantheon of the Master"},{id:"p2",label:"Pantheon of the Artist"},
+      {id:"p3",label:"Pantheon of the Sage"},{id:"p4",label:"Pantheon of the Knight"},
+      {id:"p5",label:"Pantheon of Hallownest"},
+    ]}
+  ]},
+  { id:"osu", name:"osu!mania", emoji:"🎹", color:"#ff66aa", lists:[
+    { id:"osu-pp", name:"PP Milestones", items:[
+      {id:"pp100",label:"100pp"},{id:"pp200",label:"200pp"},{id:"pp300",label:"300pp"},
+      {id:"pp400",label:"400pp"},{id:"pp500",label:"500pp"},{id:"pp600",label:"600pp"},
+      {id:"pp700",label:"700pp"},{id:"pp800",label:"800pp"},{id:"pp900",label:"900pp"},
+      {id:"pp1000",label:"1000pp"},
+    ]},
+    { id:"osu-dan", name:"Dan (1–10)", items:[
+      {id:"dan1",label:"1st Dan"},{id:"dan2",label:"2nd Dan"},{id:"dan3",label:"3rd Dan"},
+      {id:"dan4",label:"4th Dan"},{id:"dan5",label:"5th Dan"},{id:"dan6",label:"6th Dan"},
+      {id:"dan7",label:"7th Dan"},{id:"dan8",label:"8th Dan"},{id:"dan9",label:"9th Dan"},
+      {id:"dan10",label:"10th Dan"},
+    ]},
+    { id:"osu-dan-gr", name:"Dan (Alpha–Epsilon)", items:[
+      {id:"dan-alpha",label:"Alpha Dan"},{id:"dan-beta",label:"Beta Dan"},
+      {id:"dan-gamma",label:"Gamma Dan"},{id:"dan-delta",label:"Delta Dan"},
+      {id:"dan-epsilon",label:"Epsilon Dan"},
+    ]},
+  ]},
+  { id:"obby", name:"Obby (Roblox)", emoji:"🟥", color:"#fb923c", lists:[
+    { id:"obby-d", name:"Difficulty Clears", items:[
+      {id:"ob-easy",label:"Easy"},{id:"ob-med",label:"Medium"},{id:"ob-hard",label:"Hard"},
+      {id:"ob-diff",label:"Difficult"},{id:"ob-chall",label:"Challenging"},
+      {id:"ob-int",label:"Intense"},{id:"ob-rem",label:"Remorseless"},
+      {id:"ob-ins",label:"Insane"},{id:"ob-ext",label:"Extreme"},
+      {id:"ob-ter",label:"Terrifying"},{id:"ob-cat",label:"Catastrophic"},
+      {id:"ob-hor",label:"Horrific"},{id:"ob-unr",label:"Unreal"},
+    ]},
+    { id:"obby-j", name:"All Jump Clears", items:[
+      {id:"jb-easy",label:"Easy"},{id:"jb-med",label:"Medium"},{id:"jb-hard",label:"Hard"},
+      {id:"jb-diff",label:"Difficult"},{id:"jb-chall",label:"Challenging"},
+      {id:"jb-int",label:"Intense"},{id:"jb-rem",label:"Remorseless"},
+      {id:"jb-ins",label:"Insane"},{id:"jb-ext",label:"Extreme"},
+      {id:"jb-ter",label:"Terrifying"},{id:"jb-cat",label:"Catastrophic"},
+      {id:"jb-hor",label:"Horrific"},{id:"jb-unr",label:"Unreal"},
+    ]},
+  ]},
+  { id:"er", name:"Elden Ring", emoji:"⚔️", color:"#facc15", lists:[
+    { id:"er-b", name:"Main Bosses", items:[
+      {id:"mg",label:"Margit"},{id:"gf",label:"Godrick"},{id:"rd",label:"Radahn"},
+      {id:"ry",label:"Rykard"},{id:"ml2",label:"Malenia"},{id:"mh",label:"Mohg"},{id:"eld2",label:"Elden Beast"},
+    ]}
+  ]},
+  { id:"mc", name:"Minecraft", emoji:"⛏️", color:"#86efac", lists:[
+    { id:"mc-p", name:"Progression", items:[
+      {id:"nether",label:"Enter the Nether"},{id:"fortress",label:"Nether Fortress cleared"},
+      {id:"end",label:"Enter the End"},{id:"dragon",label:"Ender Dragon killed"},
+      {id:"wither",label:"Wither killed"},{id:"elder",label:"Elder Guardian killed"},
+    ]}
+  ]},
+  { id:"chess", name:"Chess.com", emoji:"♟️", color:"#4ade80", lists:[
+    { id:"chess-r", name:"Rating Goals", items:[
+      {id:"r1000",label:"1000 Blitz"},{id:"r1200",label:"1200 Blitz"},{id:"r1500",label:"1500 Blitz"},
+      {id:"r1800",label:"1800 Blitz"},{id:"r2000",label:"2000 Blitz"},
+    ]}
+  ]},
+];
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+function genId(){ return Math.random().toString(36).slice(2,10); }
+function getUserId(){
+  let id=localStorage.getItem("gtracker-uid");
+  if(!id){ id=genId()+genId(); localStorage.setItem("gtracker-uid",id); }
+  return id;
+}
+const SK_PRIVATE   = (uid) => `private-${uid}`;
+const SK_SHARED    = (uid) => `share-${uid}`;
+const SK_COMMUNITY = "community-templates-v1";
+const SK_USERNAMES = "gtracker-usernames-v1";
+// SHA-256("maslomaslane12312312")
+const ADMIN_HASH     = "mmt_admin_9f3a2";
+const ADMIN_PW_HASH  = "c6a8b6c54bf9f0aceb777c20d87513811d9ae2ea9236191554b8d56cc59f1b17";
+const POLL_MS        = 5000;
+const tsNow          = () => Date.now();
+const in24h          = (ts) => ts && (tsNow()-ts) < 86400000;
+
+const SC = {
+  none:       { color:null,       bg:null },
+  in_progress:{ color:"#fbbf24",  bg:"#fbbf2415" },
+  completed:  { color:"#4ade80",  bg:"#4ade8015" },
+};
+
+function encodeModal(type,...args){ return JSON.stringify({type,args}); }
+function decodeModal(str){ try{ return JSON.parse(str); }catch{ return null; } }
+
+function freshLists(lists){
+  return lists.map(l=>({...l, id:genId(), items:l.items.map(it=>({id:genId(),label:it.label,status:"none",completedAt:null,startedAt:null,_templateItemId:it.id}))}));
+}
+
+function mergeLists(existingLists, newTemplateLists){
+  const existing = {};
+  for(const l of existingLists)
+    for(const it of l.items)
+      if(it._templateItemId) existing[it._templateItemId]=it;
+  return newTemplateLists.map(newList=>{
+    const existingList = existingLists.find(l=>l.name===newList.name);
+    return {
+      ...newList, id: existingList?.id || genId(),
+      items: newList.items.map(it=>{
+        const prev = existing[it.id];
+        return { id:prev?.id||genId(), label:it.label, status:prev?.status||"none", completedAt:prev?.completedAt||null, startedAt:prev?.startedAt||null, _templateItemId:it.id };
+      })
+    };
+  });
+}
+
+function inpStyle(){
+  return {background:"#0e0e18",border:"1px solid #222236",color:"#ddddf5",borderRadius:6,padding:"8px 11px",fontFamily:"'JetBrains Mono',monospace",fontSize:12,width:"100%",outline:"none"};
+}
+
+// ─── Components ────────────────────────────────────────────────────────────────
+function Section({label,children,action}){
+  return (
+    <div style={{marginBottom:34}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{color:"#52527a",fontSize:9,letterSpacing:3,fontWeight:600}}>{label}</div>
+        {action&&<button onClick={action.onClick} style={{background:"transparent",border:"none",color:"#52527a",cursor:"pointer",fontFamily:"inherit",fontSize:10,textDecoration:"underline",padding:0}}>{action.label}</button>}
+      </div>
+      {children}
+    </div>
+  );
+}
+function EmptyNote({text}){ return <div style={{color:"#4a4a70",fontSize:12,padding:"10px 0"}}>{text}</div>; }
+function SettingsRow({label,children}){
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 0",borderBottom:"1px solid #222236"}}>
+      <span style={{fontSize:12,color:"#9090b0"}}>{label}</span>{children}
+    </div>
+  );
+}
+function ActivityRow({it,t,onLMB,onRMB,onGameClick,showTime,readonly}){
+  const sc=SC[it.status];
+  function timeAgo(ts){ const m=Math.floor((Date.now()-ts)/60000); if(m<1)return "just now"; if(m<60)return `${m}m ago`; return `${Math.floor(m/60)}h ago`; }
+  return (
+    <div
+      onClick={!readonly?onLMB:undefined}
+      onContextMenu={!readonly?(e)=>{e.preventDefault();onRMB();}:undefined}
+      style={{display:"flex",alignItems:"center",gap:12,background:sc.bg||"#141420",border:`1px solid ${sc.color?sc.color+"40":"#222236"}`,borderRadius:8,padding:"10px 14px",marginBottom:6,cursor:readonly?"default":"pointer",userSelect:"none"}}>
+      <button onClick={e=>{e.stopPropagation();onGameClick();}} style={{background:"transparent",border:"none",cursor:"pointer",fontSize:18,padding:0,lineHeight:1}}>{it.gameEmoji}</button>
+      <div style={{flex:1}}>
+        <div style={{fontSize:12,fontWeight:600}}>{it.label}</div>
+        <div style={{fontSize:10,color:"#52527a",marginTop:2}}>
+          <span onClick={e=>{e.stopPropagation();onGameClick();}} style={{cursor:"pointer",textDecoration:"underline",textDecorationColor:"#333"}}>{it.gameName}</span>
+          {" · "}{it.listName}
+          {showTime&&it.completedAt&&<span style={{marginLeft:6,color:"#4ade8080"}}>{timeAgo(it.completedAt)}</span>}
+        </div>
+      </div>
+      {sc.color&&<span style={{fontSize:9,letterSpacing:1,color:sc.color,fontWeight:600}}>{t[`status_${it.status}`]}</span>}
+    </div>
+  );
+}
+function Modal({title,onClose,children}){
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000092",display:"flex",alignItems:"center",justifyContent:"center",zIndex:400}}>
+      <div style={{background:"#141420",border:"1px solid #222236",borderRadius:12,padding:24,width:440,maxWidth:"93vw",fontFamily:"'JetBrains Mono',monospace",maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:16}}>{title}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+function ModalBtns({onClose,onConfirm,label="add"}){
+  return (
+    <div style={{display:"flex",gap:8,marginTop:14,justifyContent:"flex-end"}}>
+      <button onClick={onClose} style={{background:"transparent",border:"1px solid #222236",color:"#4a4a70",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>cancel</button>
+      <button onClick={onConfirm} style={{background:"#6f63f5",border:"none",color:"#fff",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>{label}</button>
+    </div>
+  );
+}
+
+// ─── App ───────────────────────────────────────────────────────────────────────
+function App(){
+  const [userId]  = useState(()=>getUserId());
+  const [lang, setLang] = useState(()=>localStorage.getItem("gtracker-lang")||"en");
+  const t = LANGS[lang];
+  const C = {bg:"#0e0e18",surf:"#141420",surf2:"#1a1a28",border:"#222236",text:"#ddddf5",muted:"#4a4a70",accent:"#6f63f5"};
+
+  const [games, setGames]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [view, setView]       = useState("home");
+
+  const [shareMode, setShareMode]       = useState(false);
+  const [liveData, setLiveData]         = useState(null);
+  const [liveStatus, setLiveStatus]     = useState("loading");
+  const [liveOwnerName, setLiveOwnerName] = useState("");
+  const [shareEnabled, setShareEnabled] = useState(false);
+  const [copied, setCopied]             = useState(false);
+  const pollRef = useRef(null);
+
+  const [communityTemplates, setCommunityTemplates] = useState([]);
+  const [submitGameId, setSubmitGameId]   = useState("");
+  const [submitError, setSubmitError]     = useState("");
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [showMoreCommunity, setShowMoreCommunity] = useState(false);
+
+  const [isAdmin, setIsAdmin] = useState(()=>localStorage.getItem("gtracker-admin")===ADMIN_HASH);
+  const [adminPw, setAdminPw] = useState("");
+  const [adminErr, setAdminErr] = useState("");
+
+  const [username, setUsername]           = useState(()=>localStorage.getItem("gtracker-username")||"");
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameInput, setUsernameInput]     = useState("");
+  const [usernamesSaved, setUsernamesSaved]   = useState(false);
+  const [usernameMap, setUsernameMap]         = useState({});
+
+  const [modal, setModal]             = useState(null);
+  const [newGame, setNewGame]         = useState({name:"",emoji:"🎮",color:"#60a5fa"});
+  const [newListName, setNewListName] = useState("");
+  const [newItemLabel, setNewItemLabel] = useState("");
+  const [confirm, setConfirm]         = useState(null);
+  const [undoToast, setUndoToast]     = useState(null);
+  const undoRef = useRef(null);
+
+  // ── Load ────────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    const shareUid = params.get("share");
+    if(shareUid){
+      setShareMode(true);
+      fetchLive(shareUid);
+      pollRef.current = setInterval(()=>fetchLive(shareUid), POLL_MS);
+      setLoading(false);
+    } else {
+      (async()=>{
+        try{
+          const r = await storage.get(SK_PRIVATE(userId));
+          if(r?.value) setGames(JSON.parse(r.value));
+        }catch(e){ console.warn("load error",e); }
+        try{
+          const r = await storage.get(SK_SHARED(userId));
+          if(r?.value) setShareEnabled(true);
+        }catch{}
+        setLoading(false);
+      })();
+    }
+    loadCommunity();
+    loadUsernameMap();
+    return ()=>{ if(pollRef.current) clearInterval(pollRef.current); };
+  },[]);
+
+  async function fetchLive(uid){
+    try{
+      const r = await storage.get(SK_SHARED(uid));
+      if(r?.value){
+        const val = JSON.parse(r.value);
+        if(Array.isArray(val)){ setLiveData(val); setLiveOwnerName(""); }
+        else { setLiveData(val.games||[]); setLiveOwnerName(val.ownerName||""); }
+        setLiveStatus("ok");
+      } else setLiveStatus("error");
+    }catch{ setLiveStatus("error"); }
+  }
+
+  async function loadCommunity(){
+    try{
+      const r = await storage.get(SK_COMMUNITY);
+      setCommunityTemplates(r?.value ? JSON.parse(r.value) : []);
+    }catch{ setCommunityTemplates([]); }
+  }
+
+  async function saveCommunity(templates){
+    try{ await storage.set(SK_COMMUNITY, JSON.stringify(templates), true); }catch{}
+    setCommunityTemplates(templates);
+  }
+
+  async function loadUsernameMap(){
+    try{
+      const r = await storage.get(SK_USERNAMES);
+      setUsernameMap(r?.value ? JSON.parse(r.value) : {});
+    }catch{ setUsernameMap({}); }
+  }
+
+  function displayName(uid){ return usernameMap[uid]||`user_${uid.slice(0,6)}`; }
+
+  async function saveUsername(name){
+    const trimmed = name.trim().slice(0,32);
+    localStorage.setItem("gtracker-username", trimmed);
+    setUsername(trimmed);
+    try{
+      const r = await storage.get(SK_USERNAMES);
+      const map = r?.value ? JSON.parse(r.value) : {};
+      if(trimmed) map[userId]=trimmed; else delete map[userId];
+      await storage.set(SK_USERNAMES, JSON.stringify(map), true);
+      setUsernameMap(map);
+    }catch{}
+    setUsernamesSaved(true);
+    setEditingUsername(false);
+    setTimeout(()=>setUsernamesSaved(false), 2000);
+  }
+
+  // ── Save ────────────────────────────────────────────────────────────────────
+  const save = useCallback(async(g)=>{
+    try{ await storage.set(SK_PRIVATE(userId), JSON.stringify(g)); }catch{}
+    // Auto-sync to share if active
+    try{
+      const pub = await storage.get(SK_SHARED(userId));
+      if(pub?.value){
+        const payload = {games:g, ownerName:localStorage.getItem("gtracker-username")||""};
+        await storage.set(SK_SHARED(userId), JSON.stringify(payload), true);
+      }
+    }catch{}
+  },[userId]);
+
+  function mutate(updater){ setGames(prev=>{ const next=updater(prev); save(next); return next; }); }
+  function mutateGame(id,fn){ mutate(prev=>prev.map(g=>g.id===id?fn(g):g)); }
+
+  const display = shareMode?(liveData||[]):games;
+  const activeGameId = view.startsWith("game:")?view.slice(5):null;
+  const activeGame = display.find(g=>g.id===activeGameId);
+
+  // ── Template update checks ───────────────────────────────────────────────────
+  const gamesWithUpdates = games.filter(g=>{
+    if(!g.sourceTemplateId) return false;
+    const tmpl = communityTemplates.find(ct=>ct.id===g.sourceTemplateId);
+    return tmpl && tmpl.version > (g.sourceTemplateVersion||1);
+  });
+
+  // ── Language ────────────────────────────────────────────────────────────────
+  function changeLang(l){ setLang(l); localStorage.setItem("gtracker-lang",l); }
+
+  // ── Share ───────────────────────────────────────────────────────────────────
+  async function enableShare(){
+    const payload = {games, ownerName:localStorage.getItem("gtracker-username")||""};
+    await storage.set(SK_SHARED(userId), JSON.stringify(payload), true);
+    setShareEnabled(true);
+  }
+  async function disableShare(){
+    await storage.delete(SK_SHARED(userId));
+    setShareEnabled(false);
+  }
+  function getShareUrl(){ return `${window.location.origin}${window.location.pathname}?share=${userId}`; }
+  async function copyShareLink(){
+    if(!shareEnabled) await enableShare();
+    navigator.clipboard.writeText(getShareUrl()).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2500); });
+  }
+
+  // ── Undo ────────────────────────────────────────────────────────────────────
+  function showUndo(msg,snap){
+    if(undoRef.current) clearTimeout(undoRef.current);
+    const tid=setTimeout(()=>{ setUndoToast(null); undoRef.current=null; },6000);
+    undoRef.current=tid; setUndoToast({message:msg,snapshot:snap,timeoutId:tid});
+  }
+  function doUndo(){ if(!undoToast)return; clearTimeout(undoToast.timeoutId); setGames(undoToast.snapshot); save(undoToast.snapshot); setUndoToast(null); }
+  function askConfirm(msg,fn){ setConfirm({message:msg,onConfirm:fn}); }
+
+  // ── Mutations ───────────────────────────────────────────────────────────────
+  function setItemStatus(gameId,listId,itemId,newStatus){
+    mutateGame(gameId,g=>({...g,lists:g.lists.map(l=>l.id!==listId?l:{...l,items:l.items.map(it=>{
+      if(it.id!==itemId)return it;
+      if(it.status===newStatus) return {...it,status:"none",completedAt:null,startedAt:null};
+      return {...it,status:newStatus,completedAt:newStatus==="completed"?tsNow():null,startedAt:newStatus==="in_progress"?tsNow():it.startedAt};
+    })})}));
+  }
+
+  function clearRecentHistory(){
+    askConfirm(t.clearRecentConfirm,()=>{
+      const snap=games;
+      mutate(prev=>prev.map(g=>({...g,lists:g.lists.map(l=>({...l,items:l.items.map(it=>it.status==="completed"?{...it,completedAt:null}:it)}))})));
+      showUndo(t.clearRecent,snap);
+    });
+  }
+
+  function addGameFromTemplate(tmpl, isBuiltin=false){
+    const id=genId();
+    const g={id,name:tmpl.name,emoji:tmpl.emoji,color:tmpl.color,lists:freshLists(tmpl.lists),sourceTemplateId:isBuiltin?null:tmpl.id,sourceTemplateVersion:isBuiltin?null:(tmpl.version||1)};
+    mutate(prev=>[...prev,g]);
+    setView(`game:${id}`); setModal(null);
+  }
+
+  function applyTemplateUpdate(gameId){
+    const game=games.find(g=>g.id===gameId); if(!game)return;
+    const tmpl=communityTemplates.find(ct=>ct.id===game.sourceTemplateId); if(!tmpl)return;
+    mutateGame(gameId,g=>({...g,name:tmpl.name,emoji:tmpl.emoji,color:tmpl.color,lists:mergeLists(g.lists,tmpl.lists),sourceTemplateVersion:tmpl.version}));
+  }
+
+  function addCustomGame(){
+    if(!newGame.name.trim())return;
+    const id=genId();
+    mutate(prev=>[...prev,{id,name:newGame.name.trim(),emoji:newGame.emoji,color:newGame.color,lists:[],sourceTemplateId:null}]);
+    setView(`game:${id}`); setNewGame({name:"",emoji:"🎮",color:"#60a5fa"}); setModal(null);
+  }
+  function addList(gameId){
+    if(!newListName.trim())return;
+    mutateGame(gameId,g=>({...g,lists:[...g.lists,{id:genId(),name:newListName.trim(),items:[]}]}));
+    setNewListName(""); setModal(null);
+  }
+  function addItem(gameId,listId){
+    if(!newItemLabel.trim())return;
+    mutateGame(gameId,g=>({...g,lists:g.lists.map(l=>l.id!==listId?l:{...l,items:[...l.items,{id:genId(),label:newItemLabel.trim(),status:"none",completedAt:null,startedAt:null}]})}));
+    setNewItemLabel(""); setModal(null);
+  }
+  function deleteGame(id){
+    askConfirm(t.deleteGameConfirm(display.find(g=>g.id===id)?.name||""),()=>{
+      const snap=games; mutate(prev=>prev.filter(g=>g.id!==id)); setView("home"); showUndo(t.undoDeleted,snap);
+    });
+  }
+  function deleteList(gameId,listId){
+    const list=display.find(g=>g.id===gameId)?.lists.find(l=>l.id===listId);
+    askConfirm(t.deleteListConfirm(list?.name||""),()=>{
+      const snap=games; mutateGame(gameId,g=>({...g,lists:g.lists.filter(l=>l.id!==listId)})); showUndo(`${t.undoList} "${list?.name}"`,snap);
+    });
+  }
+  function deleteItem(gameId,listId,itemId){
+    const item=display.find(g=>g.id===gameId)?.lists.find(l=>l.id===listId)?.items.find(it=>it.id===itemId);
+    const snap=games;
+    mutateGame(gameId,g=>({...g,lists:g.lists.map(l=>l.id!==listId?l:{...l,items:l.items.filter(it=>it.id!==itemId)})}));
+    showUndo(`${t.undoItem} "${item?.label}"`,snap);
+  }
+
+  // ── Community ───────────────────────────────────────────────────────────────
+  const BUILTIN_NAMES = new Set(BUILTIN.map(b=>b.name.toLowerCase().trim()));
+
+  function myTemplateForGame(gameId){
+    const game=games.find(g=>g.id===gameId); if(!game)return null;
+    return communityTemplates.find(tmpl=>tmpl.authorId===userId&&(tmpl.sourceGameId===gameId||tmpl.name.toLowerCase().trim()===game.name.toLowerCase().trim()));
+  }
+
+  function validateTemplate(game){ return game&&game.lists.length>0&&game.lists.every(l=>l.items.length>=3); }
+
+  async function submitOrUpdateTemplate(){
+    setSubmitError(""); setSubmitSuccess(false);
+    const game=games.find(g=>g.id===submitGameId);
+    if(!game){ setSubmitError("Select a game"); return; }
+    if(BUILTIN_NAMES.has(game.name.toLowerCase().trim())){ setSubmitError(t.duplicateBuiltin); return; }
+    if(!validateTemplate(game)){ setSubmitError(t.submitValidation); return; }
+    const lists=game.lists.map(l=>({id:l.id,name:l.name,items:l.items.map(it=>({id:it._templateItemId||it.id,label:it.label}))}));
+    const existing=myTemplateForGame(game.id);
+    if(existing){
+      const updated=communityTemplates.map(tmpl=>tmpl.id===existing.id?{...tmpl,name:game.name,emoji:game.emoji,color:game.color,lists,version:(tmpl.version||1)+1,updatedAt:tsNow()}:tmpl);
+      await saveCommunity(updated);
+    } else {
+      const tmpl={id:genId(),name:game.name,emoji:game.emoji,color:game.color,authorId:userId,authorName:username||`user_${userId.slice(0,6)}`,sourceGameId:game.id,submittedAt:tsNow(),updatedAt:tsNow(),version:1,lists};
+      await saveCommunity([...communityTemplates,tmpl]);
+    }
+    setSubmitSuccess(true); setSubmitGameId("");
+    setTimeout(()=>setModal(null),1400);
+  }
+
+  async function deleteCommunityTemplate(id){ await saveCommunity(communityTemplates.filter(ct=>ct.id!==id)); }
+
+  // ── Admin ───────────────────────────────────────────────────────────────────
+  async function sha256hex(str){
+    const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }
+  async function tryAdminLogin(){
+    setAdminErr("");
+    if(!adminPw.trim()){ setAdminErr("Enter a password"); return; }
+    const hash=await sha256hex(adminPw);
+    if(hash===ADMIN_PW_HASH){ localStorage.setItem("gtracker-admin",ADMIN_HASH); setIsAdmin(true); setAdminErr(""); setAdminPw(""); }
+    else setAdminErr("Wrong password");
+  }
+  function adminLogout(){ localStorage.removeItem("gtracker-admin"); setIsAdmin(false); }
+
+  // ── Derived ─────────────────────────────────────────────────────────────────
+  const allItems = display.flatMap(g=>g.lists.flatMap(l=>l.items.map(it=>({...it,gameName:g.name,gameEmoji:g.emoji,gameId:g.id,listName:l.name,listId:l.id}))));
+  const inProgress = allItems.filter(it=>it.status==="in_progress");
+  const recentCompleted = allItems.filter(it=>it.status==="completed"&&in24h(it.completedAt)).sort((a,b)=>(b.completedAt||0)-(a.completedAt||0));
+  function gameCompletionPct(g){ const all=g.lists.flatMap(l=>l.items); if(!all.length)return null; return Math.round(all.filter(it=>it.status==="completed").length/all.length*100); }
+
+  const modalData=modal?decodeModal(modal):null;
+
+  if(loading) return <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",color:C.muted,fontFamily:"monospace"}}>{t.loading}</div>;
+  if(shareMode&&liveStatus==="loading"&&!liveData) return <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,color:C.muted,fontFamily:"monospace"}}><div style={{fontSize:32}}>⏳</div><div>{t.loading}</div></div>;
+  if(shareMode&&liveStatus==="error"&&!liveData) return <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,color:C.muted,fontFamily:"monospace"}}><div style={{fontSize:32}}>❌</div><div style={{color:"#ff6666"}}>{t.shareNotFound}</div><div style={{fontSize:12}}>{t.shareDisabled}</div></div>;
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'JetBrains Mono','Fira Code',monospace",display:"flex",flexDirection:"column"}}>
+
+      {/* ── Header ── */}
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.border}`,padding:"11px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,gap:8,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={()=>setView("home")} style={{background:"none",border:"none",color:C.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:15,letterSpacing:1,padding:0}}>🏆 {t.appName}</button>
+          {shareMode&&(
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{background:"#1a3329",color:"#4ade80",border:"1px solid #4ade80",borderRadius:4,padding:"2px 7px",fontSize:10}}>{t.liveLabel}</span>
+              <span style={{fontSize:11,color:"#c8f5c8",fontWeight:600}}>{liveOwnerName||t.anonymous}</span>
+              <span style={{fontSize:10,color:C.muted}}>{liveStatus==="ok"?t.liveOk:t.liveLoading}</span>
+            </div>
+          )}
+        </div>
+        {!shareMode&&(
+          <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            {activeGame&&<button onClick={()=>setView("home")} className="nav-btn" style={{color:C.muted}}>{t.back}</button>}
+            <button onClick={()=>setView("community")} className={`nav-btn${view==="community"?" active":""}`} style={{color:view==="community"?C.text:C.muted}}>{t.community}</button>
+            <button onClick={()=>setView("settings")} className={`nav-btn${view==="settings"?" active":""}`} style={{color:view==="settings"?C.text:C.muted}}>{t.settings}</button>
+            <button onClick={copyShareLink} style={{background:copied?"#1a3329":shareEnabled?"#0d1f2d":"transparent",color:copied?"#4ade80":shareEnabled?"#60a5fa":C.muted,border:`1px solid ${copied?"#4ade80":shareEnabled?"#60a5fa40":C.border}`,borderRadius:6,padding:"5px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11,transition:"all .2s"}}>
+              {copied?t.shareCopied:t.liveShare}
+            </button>
+            {shareEnabled&&<button onClick={disableShare} style={{background:"transparent",border:"1px solid #ff444430",color:"#ff6666",borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>{t.disableShare}</button>}
+          </div>
+        )}
+      </div>
+      {!shareMode&&shareEnabled&&(
+        <div style={{background:"#0d1f2d",borderBottom:"1px solid #1a3a5a",padding:"7px 20px",fontSize:11,color:"#60a5fa"}}>🔗 {t.shareActive}</div>
+      )}
+
+      {/* ── Body ── */}
+      <div style={{flex:1,overflowY:"auto"}}>
+
+        {/* HOME */}
+        {view==="home"&&(
+          <div style={{maxWidth:860,margin:"0 auto",padding:"28px 20px"}}>
+            {!shareMode&&(
+              <div style={{marginBottom:28,display:"flex",alignItems:"center",gap:10}}>
+                {editingUsername?(
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:20,fontWeight:700,color:C.muted}}>👋</span>
+                    <input value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} placeholder={t.usernamePlaceholder} maxLength={32} autoFocus onKeyDown={e=>{if(e.key==="Enter")saveUsername(usernameInput);if(e.key==="Escape")setEditingUsername(false);}} style={{...inpStyle(),width:200,padding:"5px 10px",fontSize:15,fontWeight:700}}/>
+                    <button onClick={()=>saveUsername(usernameInput)} style={{background:C.accent,border:"none",color:"#fff",borderRadius:6,padding:"5px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>{t.add}</button>
+                    <button onClick={()=>setEditingUsername(false)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>{t.cancel}</button>
+                  </div>
+                ):(
+                  <>
+                    <span style={{fontSize:22,fontWeight:700,color:C.text}}>👋 {lang==="pl"?"Cześć,":"Welcome,"} <span style={{color:C.accent}}>{username||t.anonymous}</span></span>
+                    <button onClick={()=>{setUsernameInput(username);setEditingUsername(true);}} title={t.usernameEdit} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"2px 4px",lineHeight:1,borderRadius:4}}>✏️</button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {gamesWithUpdates.length>0&&!shareMode&&(
+              <div style={{marginBottom:24}}>
+                {gamesWithUpdates.map(g=>(
+                  <div key={g.id} style={{background:"#1a2a1a",border:"1px solid #4ade8040",borderRadius:8,padding:"10px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+                    <span style={{fontSize:18}}>{g.emoji}</span>
+                    <span style={{fontSize:12,flex:1,color:"#c8f5c8"}}>{t.updateNotice(g.name)}</span>
+                    <button onClick={()=>applyTemplateUpdate(g.id)} style={{background:"#4ade8020",border:"1px solid #4ade8060",color:"#4ade80",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>{t.applyUpdate}</button>
+                    <button onClick={()=>setView(`game:${g.id}`)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"5px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>View</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Section label={t.inProgress} C={C}>
+              {inProgress.length===0?<EmptyNote text={t.noInProgress}/>:inProgress.map(it=>(
+                <ActivityRow key={it.id} it={it} t={t} readonly={shareMode}
+                  onLMB={()=>setItemStatus(it.gameId,it.listId,it.id,"completed")}
+                  onRMB={()=>setItemStatus(it.gameId,it.listId,it.id,"in_progress")}
+                  onGameClick={()=>setView(`game:${it.gameId}`)}/>
+              ))}
+            </Section>
+
+            <Section label={t.recent} C={C} action={recentCompleted.length>0&&!shareMode?{label:t.clearRecent,onClick:clearRecentHistory}:null}>
+              {recentCompleted.length===0?<EmptyNote text={t.noRecent}/>:recentCompleted.map(it=>(
+                <ActivityRow key={it.id} it={it} t={t} readonly={shareMode} showTime
+                  onLMB={()=>setItemStatus(it.gameId,it.listId,it.id,"completed")}
+                  onRMB={()=>setItemStatus(it.gameId,it.listId,it.id,"in_progress")}
+                  onGameClick={()=>setView(`game:${it.gameId}`)}/>
+              ))}
+            </Section>
+
+            <Section label={t.games} C={C}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:10}}>
+                {display.map(g=>{
+                  const pct=gameCompletionPct(g),all=g.lists.flatMap(l=>l.items);
+                  const ip=all.filter(it=>it.status==="in_progress").length,done=all.filter(it=>it.status==="completed").length;
+                  const hasUpdate=gamesWithUpdates.some(gu=>gu.id===g.id);
+                  return (
+                    <button key={g.id} className="game-card" onClick={()=>setView(`game:${g.id}`)} style={{background:C.surf,border:`1px solid ${hasUpdate?"#4ade8040":C.border}`,borderRadius:10,padding:15,cursor:"pointer",textAlign:"left",color:C.text,fontFamily:"inherit",transition:"border-color .15s",display:"flex",flexDirection:"column",gap:10,position:"relative"}}>
+                      {hasUpdate&&<div style={{position:"absolute",top:8,right:10,width:7,height:7,borderRadius:"50%",background:"#4ade80"}}/>}
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:26}}>{g.emoji}</span>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:13}}>{g.name}</div>
+                          <div style={{color:C.muted,fontSize:10,marginTop:2}}>
+                            {ip>0&&<span style={{color:"#fbbf24"}}>{ip} in progress · </span>}
+                            <span>{done}/{all.length} {t.completed}</span>
+                          </div>
+                        </div>
+                      </div>
+                      {pct!==null&&(
+                        <div>
+                          <div style={{height:4,background:C.border,borderRadius:99,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:`linear-gradient(90deg,${g.color}80,${g.color})`,borderRadius:99,transition:"width .4s"}}/>
+                          </div>
+                          <div style={{color:C.muted,fontSize:10,marginTop:4,textAlign:"right"}}>{pct}%</div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+                {!shareMode&&(
+                  <button onClick={()=>setModal(encodeModal("addGame"))} style={{background:"transparent",border:`1px dashed ${C.border}`,borderRadius:10,padding:15,cursor:"pointer",color:C.muted,fontFamily:"inherit",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",minHeight:80}}>
+                    {t.addGame}
+                  </button>
+                )}
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {/* GAME VIEW */}
+        {activeGame&&(
+          <div style={{maxWidth:760,margin:"0 auto",padding:"28px 20px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:26,paddingBottom:16,borderBottom:`1px solid ${C.border}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:14}}>
+                <span style={{fontSize:34}}>{activeGame.emoji}</span>
+                <div>
+                  <div style={{fontSize:20,fontWeight:700}}>{activeGame.name}</div>
+                  <div style={{color:C.muted,fontSize:11,marginTop:3}}>
+                    {activeGame.lists.length} {t.lists} · {activeGame.lists.flatMap(l=>l.items).filter(it=>it.status==="completed").length}/{activeGame.lists.flatMap(l=>l.items).length} {t.completed}
+                  </div>
+                </div>
+              </div>
+              {!shareMode&&<button onClick={()=>deleteGame(activeGame.id)} style={{background:"transparent",border:"1px solid #ff444430",color:"#ff4444",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>{t.deleteGame}</button>}
+            </div>
+
+            {!shareMode&&gamesWithUpdates.some(g=>g.id===activeGame.id)&&(
+              <div style={{background:"#1a2a1a",border:"1px solid #4ade8040",borderRadius:8,padding:"10px 16px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+                <span style={{fontSize:12,color:"#c8f5c8",flex:1}}>⬆ {t.updateAvailable}</span>
+                <button onClick={()=>applyTemplateUpdate(activeGame.id)} style={{background:"#4ade8020",border:"1px solid #4ade8060",color:"#4ade80",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>{t.applyUpdate}</button>
+              </div>
+            )}
+
+            {activeGame.lists.map(list=>{
+              const done=list.items.filter(it=>it.status==="completed").length;
+              const pct=list.items.length?Math.round(done/list.items.length*100):0;
+              return (
+                <div key={list.id} style={{marginBottom:26}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{fontWeight:700,fontSize:14}}>{list.name}</span>
+                      <span style={{color:C.muted,fontSize:11}}>{done}/{list.items.length}</span>
+                      {list.items.length>0&&<div style={{width:60,height:4,background:C.border,borderRadius:99,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:activeGame.color,borderRadius:99,transition:"width .4s"}}/></div>}
+                    </div>
+                    {!shareMode&&(
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={()=>{setNewItemLabel("");setModal(encodeModal("addItem",activeGame.id,list.id));}} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,padding:"3px 9px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>+ item</button>
+                        <button onClick={()=>deleteList(activeGame.id,list.id)} style={{background:"transparent",border:"none",color:"#ff444450",cursor:"pointer",fontSize:15,lineHeight:1,padding:"0 2px"}}>×</button>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                    {list.items.length===0&&<div style={{color:C.muted,fontSize:11,padding:"8px 0"}}>{t.noItems}</div>}
+                    {list.items.map(it=>{
+                      const sc=SC[it.status];
+                      return (
+                        <div key={it.id} className="item-row"
+                          onClick={!shareMode?(e)=>{e.preventDefault();setItemStatus(activeGame.id,list.id,it.id,"completed");}:undefined}
+                          onContextMenu={!shareMode?(e)=>{e.preventDefault();setItemStatus(activeGame.id,list.id,it.id,"in_progress");}:undefined}
+                          style={{display:"flex",alignItems:"center",gap:10,background:sc.bg||C.surf,border:`1px solid ${sc.color?sc.color+"40":C.border}`,borderRadius:8,padding:"9px 13px",transition:"all .15s",cursor:shareMode?"default":"pointer",userSelect:"none"}}>
+                          <div style={{flexShrink:0,width:12,height:12,borderRadius:"50%",border:`2px solid ${sc.color||C.muted}`,background:it.status==="completed"?activeGame.color:it.status==="in_progress"?"#fbbf24":"transparent",transition:"all .15s"}}/>
+                          <span style={{flex:1,fontSize:12,textDecoration:it.status==="completed"?"line-through":"none",color:it.status==="completed"?C.muted:C.text}}>{it.label}</span>
+                          {sc.color&&<span style={{fontSize:9,letterSpacing:1,color:sc.color,fontWeight:600}}>{t[`status_${it.status}`]}</span>}
+                          {!shareMode&&<button className="item-del" onClick={e=>{e.stopPropagation();deleteItem(activeGame.id,list.id,it.id);}} style={{opacity:0,background:"transparent",border:"none",color:"#ff444460",cursor:"pointer",fontSize:14,lineHeight:1,padding:"0 4px",transition:"opacity .1s"}}>×</button>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {!shareMode&&<button onClick={()=>{setNewListName("");setModal(encodeModal("addList",activeGame.id));}} style={{background:"transparent",border:`1px dashed ${C.border}`,color:C.muted,borderRadius:8,padding:"9px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:12,marginTop:4}}>{t.addList}</button>}
+          </div>
+        )}
+
+        {/* COMMUNITY */}
+        {view==="community"&&(
+          <div style={{maxWidth:800,margin:"0 auto",padding:"28px 20px"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:700,marginBottom:4}}>{t.communityTitle}</div>
+                <div style={{color:C.muted,fontSize:12}}>{t.communityDesc}</div>
+              </div>
+              {!shareMode&&(
+                <button onClick={()=>{setSubmitGameId("");setSubmitError("");setSubmitSuccess(false);setModal(encodeModal("submitTemplate"));}} style={{background:C.accent,border:"none",color:"#fff",borderRadius:7,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
+                  {t.submitTemplate}
+                </button>
+              )}
+            </div>
+            {communityTemplates.length===0?<EmptyNote text={t.noTemplates}/>:(
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {communityTemplates.map(tmpl=>{
+                  const isOwner=tmpl.authorId===userId;
+                  return (
+                    <div key={tmpl.id} style={{background:C.surf,border:`1px solid ${isOwner?C.accent+"50":C.border}`,borderRadius:10,padding:16,display:"flex",alignItems:"center",gap:14}}>
+                      <span style={{fontSize:28,flexShrink:0}}>{tmpl.emoji}</span>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:14,display:"flex",alignItems:"center",gap:8}}>
+                          {tmpl.name}
+                          {isOwner&&<span style={{fontSize:9,color:C.accent,border:`1px solid ${C.accent}50`,borderRadius:3,padding:"1px 5px"}}>YOUR TEMPLATE</span>}
+                        </div>
+                        <div style={{color:C.muted,fontSize:10,marginTop:4}}>
+                          {tmpl.lists.length} lists · {tmpl.lists.reduce((s,l)=>s+l.items.length,0)} items
+                          {tmpl.version>1&&<span style={{marginLeft:8,color:"#a78bfa"}}>v{tmpl.version}</span>}
+                          <span style={{marginLeft:8}}>· {t.submittedBy} <span style={{color:isOwner?C.accent:"#9090c0"}}>{tmpl.authorName||displayName(tmpl.authorId)}</span></span>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:8,flexShrink:0}}>
+                        <button onClick={()=>addGameFromTemplate(tmpl,false)} style={{background:C.accent,border:"none",color:"#fff",borderRadius:6,padding:"6px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>{t.loadTemplate}</button>
+                        {isAdmin&&(
+                          <button onClick={()=>askConfirm(`Delete template "${tmpl.name}"?`,()=>deleteCommunityTemplate(tmpl.id))} style={{background:"transparent",border:"1px solid #ff444430",color:"#ff4444",borderRadius:6,padding:"6px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>{t.deleteTemplate}</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SETTINGS */}
+        {view==="settings"&&(
+          <div style={{maxWidth:600,margin:"0 auto",padding:"28px 20px"}}>
+            <div style={{fontSize:18,fontWeight:700,marginBottom:24}}>{t.settingsTitle}</div>
+            <div style={{paddingBottom:20,marginBottom:4,borderBottom:`1px solid ${C.border}`}}>
+              <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:12}}>{t.usernameLabel.toUpperCase()}</div>
+              {!editingUsername?(
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <span style={{fontSize:16,fontWeight:700,color:username?C.text:C.muted}}>{username||<span style={{fontStyle:"italic",fontSize:13}}>{t.anonymous}</span>}</span>
+                  <button onClick={()=>{setUsernameInput(username);setEditingUsername(true);}} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"4px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>{t.usernameEdit}</button>
+                  {usernamesSaved&&<span style={{fontSize:11,color:"#4ade80"}}>✓ {t.usernameSet}</span>}
+                </div>
+              ):(
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  <input value={usernameInput} onChange={e=>setUsernameInput(e.target.value)} placeholder={t.usernamePlaceholder} maxLength={32} style={{...inpStyle(),width:220}} onKeyDown={e=>{if(e.key==="Enter")saveUsername(usernameInput);if(e.key==="Escape")setEditingUsername(false);}} autoFocus/>
+                  <button onClick={()=>saveUsername(usernameInput)} style={{background:C.accent,border:"none",color:"#fff",borderRadius:6,padding:"8px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>{t.add}</button>
+                  <button onClick={()=>setEditingUsername(false)} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"8px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>{t.cancel}</button>
+                </div>
+              )}
+              <div style={{color:C.muted,fontSize:10,marginTop:8}}>{t.usernameHint}</div>
+            </div>
+            <SettingsRow label={t.language}>
+              <div style={{display:"flex",gap:8}}>
+                {["en","pl"].map(l=>(
+                  <button key={l} onClick={()=>changeLang(l)} style={{background:lang===l?C.accent:"transparent",border:`1px solid ${lang===l?C.accent:C.border}`,color:lang===l?"#fff":C.muted,borderRadius:6,padding:"6px 16px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:lang===l?700:400}}>
+                    {l==="en"?"🇬🇧 English":"🇵🇱 Polski"}
+                  </button>
+                ))}
+              </div>
+            </SettingsRow>
+            <div style={{marginTop:28,paddingTop:20,borderTop:`1px solid ${C.border}`}}>
+              <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:14}}>{t.statsTitle.toUpperCase()}</div>
+              {[[t.totalGames,games.length],[t.totalMilestones,games.flatMap(g=>g.lists.flatMap(l=>l.items)).length],[t.totalCompleted,games.flatMap(g=>g.lists.flatMap(l=>l.items)).filter(it=>it.status==="completed").length],[t.inProgressCount,games.flatMap(g=>g.lists.flatMap(l=>l.items)).filter(it=>it.status==="in_progress").length]].map(([label,val])=>(
+                <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{fontSize:12,color:C.muted}}>{label}</span>
+                  <span style={{fontSize:16,fontWeight:700}}>{val}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:28}}>
+              <button onClick={()=>setView("admin")} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"7px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>🔐 {t.adminPanel}</button>
+            </div>
+          </div>
+        )}
+
+        {/* ADMIN */}
+        {view==="admin"&&(
+          <div style={{maxWidth:600,margin:"0 auto",padding:"28px 20px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+              <button onClick={()=>setView("settings")} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:6,padding:"5px 11px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>{t.back}</button>
+              <div style={{fontSize:18,fontWeight:700}}>🔐 Admin Panel</div>
+              {isAdmin&&<span style={{background:"#1a3329",color:"#4ade80",border:"1px solid #4ade80",borderRadius:4,padding:"2px 8px",fontSize:10}}>LOGGED IN</span>}
+            </div>
+            {!isAdmin?(
+              <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:10,padding:24,maxWidth:360}}>
+                <div style={{fontSize:13,fontWeight:600,marginBottom:14}}>Enter admin password</div>
+                <input type="password" value={adminPw} onChange={e=>setAdminPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&tryAdminLogin()} placeholder="Password" style={{...inpStyle(),marginBottom:10}}/>
+                {adminErr&&<div style={{color:"#ff6666",fontSize:11,marginBottom:8}}>{adminErr}</div>}
+                <button onClick={tryAdminLogin} style={{background:C.accent,border:"none",color:"#fff",borderRadius:6,padding:"7px 18px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>Login</button>
+              </div>
+            ):(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <div style={{color:C.muted,fontSize:9,letterSpacing:2}}>COMMUNITY TEMPLATES ({communityTemplates.length})</div>
+                  <button onClick={adminLogout} style={{background:"transparent",border:`1px solid ${C.border}`,color:C.muted,borderRadius:5,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit",fontSize:11}}>Logout</button>
+                </div>
+                {communityTemplates.length===0?<EmptyNote text="No templates yet."/>:(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {communityTemplates.map(tmpl=>(
+                      <div key={tmpl.id} style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                        <span style={{fontSize:22}}>{tmpl.emoji}</span>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:600,fontSize:13}}>{tmpl.name} {tmpl.version>1&&<span style={{color:"#a78bfa",fontSize:11}}>v{tmpl.version}</span>}</div>
+                          <div style={{color:C.muted,fontSize:10,marginTop:2}}>ID: {tmpl.id.slice(0,10)} · author: <span style={{color:"#9090c0"}}>{tmpl.authorName||displayName(tmpl.authorId)}</span> · {tmpl.lists.reduce((s,l)=>s+l.items.length,0)} items</div>
+                        </div>
+                        <button onClick={()=>askConfirm(`Delete "${tmpl.name}"?`,()=>deleteCommunityTemplate(tmpl.id))} style={{background:"#2a0f0f",border:"1px solid #ff444440",color:"#ff4444",borderRadius:6,padding:"5px 12px",cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600}}>Delete</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* UNDO TOAST */}
+      {undoToast&&(
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#1e1e30",border:"1px solid #333358",borderRadius:10,padding:"12px 18px",display:"flex",alignItems:"center",gap:14,zIndex:500,animation:"slideUp .25s ease",boxShadow:"0 8px 32px #00000060",minWidth:280}}>
+          <span style={{fontSize:12,color:"#ddddf5"}}>{undoToast.message}</span>
+          <button onClick={doUndo} style={{background:"#6f63f5",border:"none",color:"#fff",borderRadius:6,padding:"5px 14px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>{t.undo}</button>
+          <button onClick={()=>{clearTimeout(undoToast.timeoutId);setUndoToast(null);}} style={{background:"transparent",border:"none",color:"#4a4a70",cursor:"pointer",fontSize:16,lineHeight:1}}>×</button>
+        </div>
+      )}
+
+      {/* CONFIRM */}
+      {confirm&&(
+        <div style={{position:"fixed",inset:0,background:"#00000095",display:"flex",alignItems:"center",justifyContent:"center",zIndex:600,animation:"fadeIn .15s ease"}}>
+          <div style={{background:"#141420",border:"1px solid #333",borderRadius:12,padding:28,width:360,maxWidth:"92vw",fontFamily:"'JetBrains Mono',monospace"}}>
+            <div style={{fontSize:18,marginBottom:8}}>⚠️</div>
+            <div style={{fontSize:13,fontWeight:600,marginBottom:8}}>{t.sureQuestion}</div>
+            <div style={{fontSize:12,color:"#9090b0",marginBottom:22,lineHeight:1.6}}>{confirm.message}</div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setConfirm(null)} style={{background:"transparent",border:"1px solid #222236",color:"#6a6a90",borderRadius:7,padding:"8px 18px",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>{t.cancel}</button>
+              <button onClick={()=>{confirm.onConfirm();setConfirm(null);}} style={{background:"#c0392b",border:"none",color:"#fff",borderRadius:7,padding:"8px 18px",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>{t.delete}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALS */}
+      {modalData?.type==="addGame"&&(
+        <Modal title={t.addGame2} onClose={()=>setModal(null)}>
+          <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:10}}>{t.premadeTemplates}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:16}}>
+            {BUILTIN.map(p=>(
+              <button key={p.id} onClick={()=>addGameFromTemplate(p,true)} style={{background:C.surf2,border:`1px solid ${C.border}`,borderRadius:7,padding:"9px 11px",cursor:"pointer",color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:17}}>{p.emoji}</span><span>{p.name}</span>
+              </button>
+            ))}
+          </div>
+          {communityTemplates.length>0&&(
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div style={{color:C.muted,fontSize:9,letterSpacing:2}}>{t.communitySection}</div>
+                <button onClick={()=>setShowMoreCommunity(v=>!v)} style={{background:"transparent",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:0}}>{showMoreCommunity?t.showLess:t.showMore}</button>
+              </div>
+              {showMoreCommunity&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                  {communityTemplates.map(p=>(
+                    <button key={p.id} onClick={()=>addGameFromTemplate(p,false)} style={{background:C.surf2,border:`1px solid ${C.border}`,borderRadius:7,padding:"9px 11px",cursor:"pointer",color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"left",display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:16}}>{p.emoji}</span><span style={{fontWeight:600}}>{p.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{color:C.muted,fontSize:9,letterSpacing:2,marginBottom:10}}>{t.custom}</div>
+          <div style={{display:"flex",gap:8,marginBottom:8}}>
+            <input value={newGame.emoji} onChange={e=>setNewGame(g=>({...g,emoji:e.target.value}))} style={{...inpStyle(),width:46}} maxLength={2}/>
+            <input value={newGame.name} onChange={e=>setNewGame(g=>({...g,name:e.target.value}))} placeholder={t.gameName} style={{...inpStyle(),flex:1}} onKeyDown={e=>e.key==="Enter"&&addCustomGame()}/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:4}}>
+            <span style={{color:C.muted,fontSize:11}}>{t.color}</span>
+            <input type="color" value={newGame.color} onChange={e=>setNewGame(g=>({...g,color:e.target.value}))} style={{width:34,height:26,background:"transparent",border:`1px solid ${C.border}`,borderRadius:5,cursor:"pointer"}}/>
+          </div>
+          <ModalBtns onClose={()=>setModal(null)} onConfirm={addCustomGame} label={t.addCustom}/>
+        </Modal>
+      )}
+      {modalData?.type==="addList"&&(
+        <Modal title={t.newList} onClose={()=>setModal(null)}>
+          <input value={newListName} onChange={e=>setNewListName(e.target.value)} placeholder={t.listPlaceholder} style={inpStyle()} onKeyDown={e=>e.key==="Enter"&&addList(modalData.args[0])} autoFocus/>
+          <ModalBtns onClose={()=>setModal(null)} onConfirm={()=>addList(modalData.args[0])} label={t.add}/>
+        </Modal>
+      )}
+      {modalData?.type==="addItem"&&(
+        <Modal title={t.newItem} onClose={()=>setModal(null)}>
+          <input value={newItemLabel} onChange={e=>setNewItemLabel(e.target.value)} placeholder={t.itemPlaceholder} style={inpStyle()} onKeyDown={e=>e.key==="Enter"&&addItem(modalData.args[0],modalData.args[1])} autoFocus/>
+          <ModalBtns onClose={()=>setModal(null)} onConfirm={()=>addItem(modalData.args[0],modalData.args[1])} label={t.add}/>
+        </Modal>
+      )}
+      {modalData?.type==="submitTemplate"&&(()=>{
+        const selectedGame=games.find(g=>g.id===submitGameId);
+        const existingForGame=selectedGame?myTemplateForGame(selectedGame.id):null;
+        const isUpdate=!!existingForGame;
+        return (
+          <Modal title={isUpdate?t.updateTitle:t.submitTitle} onClose={()=>setModal(null)}>
+            <div style={{color:C.muted,fontSize:11,marginBottom:8}}>{t.submitGameSelect}</div>
+            <select value={submitGameId} onChange={e=>setSubmitGameId(e.target.value)} style={{...inpStyle(),marginBottom:10,cursor:"pointer"}}>
+              <option value="">— select —</option>
+              {games.map(g=><option key={g.id} value={g.id}>{g.emoji} {g.name}</option>)}
+            </select>
+            {isUpdate&&(
+              <div style={{background:"#1a1a30",border:`1px solid ${C.accent}40`,borderRadius:6,padding:"8px 12px",marginBottom:10,fontSize:11,color:"#a0a0d0"}}>
+                ✏️ You already submitted a template for this game — saving will update it (v{(existingForGame.version||1)+1}).
+              </div>
+            )}
+            {submitError&&<div style={{color:"#ff6666",fontSize:11,marginBottom:8}}>{submitError}</div>}
+            {submitSuccess&&<div style={{color:"#4ade80",fontSize:11,marginBottom:8}}>✓ {isUpdate?t.updateSuccess:t.submitSuccess}</div>}
+            <ModalBtns onClose={()=>setModal(null)} onConfirm={submitOrUpdateTemplate} label={isUpdate?t.updateBtn:t.submitBtn}/>
+          </Modal>
+        );
+      })()}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
